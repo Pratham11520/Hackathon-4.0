@@ -80,22 +80,43 @@ def register_user():
         )
         return
 
-    # Capture and serialize the user's face encoding
+    # Capture and serialize the user's face encoding.
     video_capture = cv2.VideoCapture(0)
-    while True:
-        ret, frame = video_capture.read()
-        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        rgb_frame = small_frame[:, :, ::-1]
-        face_locations = face_recognition.face_locations(rgb_frame)
-        if face_locations:
-            face_encoding = face_recognition.face_encodings(rgb_frame, face_locations)[0]
-            serialized_face_encoding = serialize_face_encoding(face_encoding)
-            break
-        cv2.imshow("Capture Face", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    video_capture.release()
-    cv2.destroyAllWindows()
+    if not video_capture.isOpened():
+        messagebox.showerror("Camera error", "Unable to access the camera.")
+        return
+
+    serialized_face_encoding = None
+    try:
+        while True:
+            ret, frame = video_capture.read()
+            if not ret:
+                messagebox.showerror("Camera error", "Unable to read from the camera.")
+                break
+
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+            rgb_frame = small_frame[:, :, ::-1]
+            face_locations = face_recognition.face_locations(rgb_frame)
+            if face_locations:
+                face_encoding = face_recognition.face_encodings(
+                    rgb_frame, face_locations
+                )[0]
+                serialized_face_encoding = serialize_face_encoding(face_encoding)
+                break
+
+            cv2.imshow("Capture Face", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        video_capture.release()
+        cv2.destroyAllWindows()
+
+    if serialized_face_encoding is None:
+        messagebox.showinfo(
+            "Registration cancelled",
+            "No face was captured; the user was not registered.",
+        )
+        return
 
     hashed_password = hash_password(password)
 
