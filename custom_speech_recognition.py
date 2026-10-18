@@ -1,34 +1,73 @@
-import speech_recognition as sr
+"""Recognize speech and map configured keyword groups to responses."""
+
 import json
-import os
+from pathlib import Path
 
-def speech_recognition(responses_file):
-    # Load the responses from the JSON file
-    with open(responses_file, "r") as file:
-        responses = json.load(file)
+import speech_recognition as sr
 
-    # Create a speech recognition object
+
+def load_responses(responses_file):
+    """Load and validate the keyword-to-response mapping."""
+    path = Path(responses_file)
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            responses = json.load(file)
+    except FileNotFoundError as error:
+        raise FileNotFoundError(f"Responses file not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid JSON in {path}: {error.msg}") from error
+
+    if not isinstance(responses, dict):
+        raise ValueError("Responses must be a JSON object of keyword groups and values.")
+    return responses
+
+
+def speech_recognition(
+    responses_file,
+    timeout=None,
+    phrase_time_limit=None,
+    max_attempts=None,
+):
+    """Listen for a matching response, returning None when no match is found.
+
+    The max_attempts argument is optional; omit it to preserve continuous listening.
+    """
+    responses = load_responses(responses_file)
     recognizer = sr.Recognizer()
+    attempts = 0
 
-    # Start listening for speech
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source)
-        while True:
-            # Get the user's input
-            audio = recognizer.listen(source)
 
-            # Try to recognize the user's input
+        while max_attempts is None or attempts < max_attempts:
+            try:
+                audio = recognizer.listen(
+                    source,
+                    timeout=timeout,
+                    phrase_time_limit=phrase_time_limit,
+                )
+            except sr.WaitTimeoutError:
+                attempts += 1
+                print("Listening timed out.")
+                continue
+
+            attempts += 1
             try:
                 text = recognizer.recognize_google(audio)
-                print("Recognized:", text)
-
-                # Check if any word group matches the recognized text
-                for word_group, response in responses.items():
-                    if any(word.lower() in text.lower() for word in word_group.split()):
-                        return response
-                else:
-                    print("I didn't understand that.")
             except sr.UnknownValueError:
                 print("I didn't understand that.")
-            except sr.RequestError as e:
-                print("An error occurred:", str(e))
+                continue
+            except sr.RequestError as error:
+                print("Speech recognition service error:", error)
+                return None
+
+            print("Recognized:", text)
+            normalized_text = text.casefold()
+            for word_group, response in responses.items():
+                keywords = str(word_group).casefold().split()
+                if any(keyword in normalized_text for keyword in keywords):
+                    return response
+
+            print("I didn't understand that.")
+
+    return None
